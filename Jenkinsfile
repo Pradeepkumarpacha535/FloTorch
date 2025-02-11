@@ -1,7 +1,7 @@
 pipeline {
     agent {
         docker {
-            image 'ubuntu:latest' 
+            image 'unbuntu:latest'
             args '-u root'
         }
     }
@@ -18,17 +18,29 @@ pipeline {
         string(name: 'TEMPLATE_VERSION', defaultValue: '', description: 'FloTorch Template Version')
     }
 
+    environment {
+        AWS_REGION = "${params.AWS_REGION}"
+        PROJECT_NAME = "${params.PROJECT_NAME}"
+        TABLE_SUFFIX = "${params.TABLE_SUFFIX}"
+        CLIENT_NAME = "${params.CLIENT_NAME}"
+        CREATED_BY = "${params.CREATED_BY}"
+        OPENSEARCH_ADMIN_USER = "${params.OPENSEARCH_ADMIN_USER}"
+        OPENSEARCH_ADMIN_PASSWORD = "${params.OPENSEARCH_ADMIN_PASSWORD}"
+        NGINX_AUTH_PASSWORD = "${params.NGINX_AUTH_PASSWORD}"
+        TEMPLATE_VERSION = "${params.TEMPLATE_VERSION}"
+    }
+
     stages {
         stage('Install dependencies') {
             steps {
-                sh """
+                sh '''
                 echo "Installing AWS CLI..."
-                apt install -y unzip curl
+                yum install -y unzip curl
                 curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
                 unzip awscliv2.zip
                 ./aws/install
                 aws --version
-                """
+                '''
             }
         }
 
@@ -42,8 +54,9 @@ pipeline {
 
         stage('Deploy FloTorch Master Stack') {
             steps {
-                sh """
+                sh '''
                 echo "Starting FloTorch Stack Deployment..."
+
                 aws cloudformation create-stack \
                     --region ${AWS_REGION} \
                     --stack-name flotorch-stack \
@@ -57,7 +70,9 @@ pipeline {
                         ParameterKey=OpenSearchAdminUser,ParameterValue=${OPENSEARCH_ADMIN_USER} \
                         ParameterKey=OpenSearchAdminPassword,ParameterValue=${OPENSEARCH_ADMIN_PASSWORD} \
                         ParameterKey=NginxAuthPassword,ParameterValue=${NGINX_AUTH_PASSWORD}
-                """
+
+                echo "CloudFormation Stack Deployment Successful!"
+                '''
             }
         }
     }
@@ -67,7 +82,7 @@ pipeline {
             echo "FloTorch Stack deployed successfully!"
         }
         failure {
-            echo "Deployment failed!"
+            echo "Deployment failed!."
         }
     }
 }
