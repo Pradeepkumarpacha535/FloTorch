@@ -1,7 +1,7 @@
 pipeline {
     agent {
         docker {
-            image 'ubuntu:latest' 
+            image 'ubuntu:latest'
             args '-u root'
         }
     }
@@ -18,6 +18,18 @@ pipeline {
         string(name: 'TEMPLATE_VERSION', defaultValue: '', description: 'FloTorch Template Version')
     }
 
+    environment {
+        AWS_REGION = "${params.AWS_REGION}"
+        PROJECT_NAME = "${params.PROJECT_NAME}"
+        TABLE_SUFFIX = "${params.TABLE_SUFFIX}"
+        CLIENT_NAME = "${params.CLIENT_NAME}"
+        CREATED_BY = "${params.CREATED_BY}"
+        OPENSEARCH_ADMIN_USER = "${params.OPENSEARCH_ADMIN_USER}"
+        OPENSEARCH_ADMIN_PASSWORD = "${params.OPENSEARCH_ADMIN_PASSWORD}"
+        NGINX_AUTH_PASSWORD = "${params.NGINX_AUTH_PASSWORD}"
+        TEMPLATE_VERSION = "${params.TEMPLATE_VERSION}"
+    }
+
     stages {
         stage('Install dependencies') {
             steps {
@@ -26,7 +38,7 @@ pipeline {
                         echo "Installing AWS CLI..."
                         apt-get update
                         apt-get install -y unzip curl
-                        
+                       
                         # Check if AWS CLI is already installed
                         if ! command -v aws &> /dev/null; then
                             echo "AWS CLI not found. Installing..."
@@ -34,7 +46,7 @@ pipeline {
                             unzip -q awscliv2.zip
                             ./aws/install
                         fi
-                        
+                       
                         # Verify AWS CLI installation
                         aws --version || {
                             echo "AWS CLI installation failed"
@@ -54,27 +66,31 @@ pipeline {
             }
         }
 
-         stage('Deploy FloTorch Master Stack') {
+        stage('Deploy FloTorch Master Stack') {
             steps {
                 withAWS(credentials: 'aws-creds', region: env.AWS_REGION) {
                     sh '''
-                    echo "Starting FloTorch Stack Deployment..."
+                        echo "Starting FloTorch Stack Deployment..."
+                        aws cloudformation create-stack \
+                            --region ${AWS_REGION} \
+                            --stack-name flotorch-stack \
+                            --template-url https://flotorch-public.s3.amazonaws.com/${TEMPLATE_VERSION}/templates/master-template.yaml \
+                            --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
+                            --parameters \
+                                ParameterKey=ProjectName,ParameterValue=${PROJECT_NAME} \
+                                ParameterKey=TableSuffix,ParameterValue=${TABLE_SUFFIX} \
+                                ParameterKey=ClientName,ParameterValue=${CLIENT_NAME} \
+                                ParameterKey=CreatedBy,ParameterValue=${CREATED_BY} \
+                                ParameterKey=OpenSearchAdminUser,ParameterValue=${OPENSEARCH_ADMIN_USER} \
+                                ParameterKey=OpenSearchAdminPassword,ParameterValue=${OPENSEARCH_ADMIN_PASSWORD} \
+                                ParameterKey=NginxAuthPassword,ParameterValue=${NGINX_AUTH_PASSWORD}
 
-                    aws cloudformation create-stack \
-                        --region ${AWS_REGION} \
-                        --stack-name flotorch-stack \
-                        --template-url https://flotorch-public.s3.amazonaws.com/${TEMPLATE_VERSION}/templates/master-template.yaml \
-                        --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
-                        --parameters \
-                            ParameterKey=ProjectName,ParameterValue=${PROJECT_NAME} \
-                            ParameterKey=TableSuffix,ParameterValue=${TABLE_SUFFIX} \
-                            ParameterKey=ClientName,ParameterValue=${CLIENT_NAME} \
-                            ParameterKey=CreatedBy,ParameterValue=${CREATED_BY} \
-                            ParameterKey=OpenSearchAdminUser,ParameterValue=${OPENSEARCH_ADMIN_USER} \
-                            ParameterKey=OpenSearchAdminPassword,ParameterValue=${OPENSEARCH_ADMIN_PASSWORD} \
-                            ParameterKey=NginxAuthPassword,ParameterValue=${NGINX_AUTH_PASSWORD}
+                        echo "Waiting for stack creation to complete..."
+                        aws cloudformation wait stack-create-complete \
+                            --stack-name flotorch-stack \
+                            --region ${AWS_REGION}
 
-                    echo "CloudFormation Stack Deployment Successful!"
+                        echo "CloudFormation Stack Deployment Successful!"
                     '''
                 }
             }
@@ -90,4 +106,3 @@ pipeline {
         }
     }
 }
-
