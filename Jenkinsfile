@@ -1,17 +1,21 @@
 pipeline {
     agent {
         docker {
-            image 'ubuntu:latest'
+            image 'ubuntu:latest' 
             args '-u root'
         }
     }
 
     parameters {
-        // ... keeping existing parameters ...
-    }
-
-    environment {
-        // ... keeping existing environment variables ...
+        string(name: 'AWS_REGION', defaultValue: 'us-east-1', description: 'AWS Region (e.g., us-east-1)')
+        string(name: 'PROJECT_NAME', defaultValue: 'flotorch', description: 'Project Name (e.g., flotorch)')
+        string(name: 'TABLE_SUFFIX', defaultValue: '', description: 'Unique Table Suffix (6 lowercase letters)')
+        string(name: 'CLIENT_NAME', defaultValue: 'flotorch', description: 'Client Name (e.g., flotorch)')
+        string(name: 'CREATED_BY', defaultValue: 'DevOpsTeam', description: 'Created by (e.g., DevOpsTeam)')
+        string(name: 'OPENSEARCH_ADMIN_USER', defaultValue: 'admin', description: 'OpenSearch Admin Username')
+        password(name: 'OPENSEARCH_ADMIN_PASSWORD', description: 'OpenSearch Admin Password')
+        password(name: 'NGINX_AUTH_PASSWORD', description: 'Nginx Auth Password')
+        string(name: 'TEMPLATE_VERSION', defaultValue: '', description: 'FloTorch Template Version')
     }
 
     stages {
