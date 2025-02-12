@@ -32,31 +32,35 @@ pipeline {
 
     stages {
         stage('Install dependencies') {
-            steps {
-                script {
-                    sh '''
-                        echo "Installing AWS CLI..."
-                        apt-get update
-                        apt-get install -y unzip curl
-                       
-                        # Check if AWS CLI is already installed
-                        if ! command -v aws &> /dev/null; then
-                            echo "AWS CLI not found. Installing..."
-                            curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-                            unzip -q awscliv2.zip
-                            ./aws/install
-                        fi
-                       
-                        # Verify AWS CLI installation
-                        aws --version || {
-                            echo "AWS CLI installation failed"
-                            exit 1
-                        }
-                        echo "AWS CLI installation successful"
-                    '''
+    steps {
+        script {
+            sh '''
+                echo "Installing AWS CLI..."
+                apt-get update
+                apt-get install -y unzip curl
+                
+                # Check if AWS CLI is already installed
+                if ! command -v aws &> /dev/null; then
+                    echo "AWS CLI not found. Installing..."
+                    curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+                    # Force overwrite during unzip
+                    unzip -o -q awscliv2.zip
+                    ./aws/install --update
+                else
+                    echo "AWS CLI is already installed"
+                    aws --version
+                fi
+                
+                # Verify AWS CLI installation
+                aws --version || {
+                    echo "AWS CLI installation failed"
+                    exit 1
                 }
-            }
+                echo "AWS CLI installation successful"
+            '''
         }
+    }
+}
 
         stage('Checkout Repository') {
             steps {
