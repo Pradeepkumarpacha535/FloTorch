@@ -85,7 +85,7 @@ pipeline {
                                 ParameterKey=CreatedBy,ParameterValue=${CREATED_BY} \
                                 ParameterKey=OpenSearchAdminUser,ParameterValue=${OPENSEARCH_ADMIN_USER} \
                                 ParameterKey=OpenSearchAdminPassword,ParameterValue=${OPENSEARCH_ADMIN_PASSWORD} \
-                                ParameterKey=NginxAuthPassword,ParameterValue=${NGINX_AUTH_PASSWORD}
+                                ParameterKey=NginxAuthPassword,ParameterValue=${NGINX_AUTH_PASSWORD} \
                                 ParameterKey=PrerequisitesMet,ParameterValue=true
 
                         echo "Waiting for stack creation to complete..."
