@@ -15,7 +15,6 @@ pipeline {
         string(name: 'OPENSEARCH_ADMIN_USER', defaultValue: 'admin', description: 'OpenSearch Admin Username')
         password(name: 'OPENSEARCH_ADMIN_PASSWORD', description: 'OpenSearch Admin Password')
         password(name: 'NGINX_AUTH_PASSWORD', description: 'Nginx Auth Password')
-        string(name: 'TEMPLATE_VERSION', defaultValue: '', description: 'FloTorch Template Version')
     }
 
     environment {
@@ -27,7 +26,6 @@ pipeline {
         OPENSEARCH_ADMIN_USER = "${params.OPENSEARCH_ADMIN_USER}"
         OPENSEARCH_ADMIN_PASSWORD = "${params.OPENSEARCH_ADMIN_PASSWORD}"
         NGINX_AUTH_PASSWORD = "${params.NGINX_AUTH_PASSWORD}"
-        TEMPLATE_VERSION = "${params.TEMPLATE_VERSION}"
     }
 
     stages {
@@ -78,7 +76,7 @@ pipeline {
                         aws cloudformation create-stack \
                             --region ${AWS_REGION} \
                             --stack-name flotorch-stack \
-                            --template-url https://flotorch-public.s3.amazonaws.com/${TEMPLATE_VERSION}/templates/master-template.yaml \
+                            --template-url https://flotorch-public.s3.amazonaws.com/templates/master-template.yaml \
                             --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
                             --parameters \
                                 ParameterKey=ProjectName,ParameterValue=${PROJECT_NAME} \
