@@ -21,15 +21,28 @@ pipeline {
     stages {
         stage('Install dependencies') {
             steps {
-                sh '''
-                echo "Installing AWS CLI..."
-                apt-get update
-                apt-get install -y unzip curl
-                curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-                unzip awscliv2.zip
-                ./aws/install
-                aws --version
-                '''
+                script {
+                    sh '''
+                        echo "Installing AWS CLI..."
+                        apt-get update
+                        apt-get install -y unzip curl
+                        
+                        # Check if AWS CLI is already installed
+                        if ! command -v aws &> /dev/null; then
+                            echo "AWS CLI not found. Installing..."
+                            curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+                            unzip -q awscliv2.zip
+                            ./aws/install
+                        fi
+                        
+                        # Verify AWS CLI installation
+                        aws --version || {
+                            echo "AWS CLI installation failed"
+                            exit 1
+                        }
+                        echo "AWS CLI installation successful"
+                    '''
+                }
             }
         }
 
