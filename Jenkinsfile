@@ -41,25 +41,39 @@ pipeline {
             }
         }
 
-        stage('Deploy FloTorch Master Stack') {
+         stage('Deploy FloTorch Master Stack') {
             steps {
-                sh """
-                echo "Starting FloTorch Stack Deployment..."
-                aws cloudformation create-stack \
-                    --region ${AWS_REGION} \
-                    --stack-name flotorch-stack \
-                    --template-url https://flotorch-public.s3.amazonaws.com/${TEMPLATE_VERSION}/templates/master-template.yaml \
-                    --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
-                    --parameters \
-                        ParameterKey=ProjectName,ParameterValue=${PROJECT_NAME} \
-                        ParameterKey=TableSuffix,ParameterValue=${TABLE_SUFFIX} \
-                        ParameterKey=ClientName,ParameterValue=${CLIENT_NAME} \
-                        ParameterKey=CreatedBy,ParameterValue=${CREATED_BY} \
-                        ParameterKey=OpenSearchAdminUser,ParameterValue=${OPENSEARCH_ADMIN_USER} \
-                        ParameterKey=OpenSearchAdminPassword,ParameterValue=${OPENSEARCH_ADMIN_PASSWORD} \
-                        ParameterKey=NginxAuthPassword,ParameterValue=${NGINX_AUTH_PASSWORD}
-                """
+                withAWS(credentials: 'aws-creds', region: env.AWS_REGION) {
+                    sh '''
+                    echo "Starting FloTorch Stack Deployment..."
+
+                    aws cloudformation create-stack \
+                        --region ${AWS_REGION} \
+                        --stack-name flotorch-stack \
+                        --template-url https://flotorch-public.s3.amazonaws.com/${TEMPLATE_VERSION}/templates/master-template.yaml \
+                        --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
+                        --parameters \
+                            ParameterKey=ProjectName,ParameterValue=${PROJECT_NAME} \
+                            ParameterKey=TableSuffix,ParameterValue=${TABLE_SUFFIX} \
+                            ParameterKey=ClientName,ParameterValue=${CLIENT_NAME} \
+                            ParameterKey=CreatedBy,ParameterValue=${CREATED_BY} \
+                            ParameterKey=OpenSearchAdminUser,ParameterValue=${OPENSEARCH_ADMIN_USER} \
+                            ParameterKey=OpenSearchAdminPassword,ParameterValue=${OPENSEARCH_ADMIN_PASSWORD} \
+                            ParameterKey=NginxAuthPassword,ParameterValue=${NGINX_AUTH_PASSWORD}
+
+                    echo "CloudFormation Stack Deployment Successful!"
+                    '''
+                }
             }
+        }
+    }
+
+    post {
+        success {
+            echo "FloTorch Stack deployed successfully!"
+        }
+        failure {
+            echo "Deployment failed!"
         }
     }
 
