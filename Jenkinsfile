@@ -76,13 +76,5 @@ pipeline {
             echo "Deployment failed!"
         }
     }
-
-    post {
-        success {
-            echo "FloTorch Stack deployed successfully!"
-        }
-        failure {
-            echo "Deployment failed!"
-        }
-    }
 }
+
