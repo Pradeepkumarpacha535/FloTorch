@@ -86,7 +86,7 @@ pipeline {
                                 ParameterKey=OpenSearchAdminUser,ParameterValue=${OPENSEARCH_ADMIN_USER} \
                                 ParameterKey=OpenSearchAdminPassword,ParameterValue=${OPENSEARCH_ADMIN_PASSWORD} \
                                 ParameterKey=NginxAuthPassword,ParameterValue=${NGINX_AUTH_PASSWORD} \
-                                ParameterKey=PrerequisitesMet,ParameterValue=true
+                                ParameterKey=PrerequisitesMet,ParameterValue=yes
 
                         echo "Waiting for stack creation to complete..."
                         aws cloudformation wait stack-create-complete \
