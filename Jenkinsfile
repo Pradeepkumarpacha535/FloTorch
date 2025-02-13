@@ -15,6 +15,7 @@ pipeline {
         string(name: 'OPENSEARCH_ADMIN_USER', defaultValue: 'admin', description: 'OpenSearch Admin Username')
         password(name: 'OPENSEARCH_ADMIN_PASSWORD', description: 'OpenSearch Admin Password')
         password(name: 'NGINX_AUTH_PASSWORD', description: 'Nginx Auth Password')
+        string(name: 'TEMPLATE_VERSION', defaultValue: 'v1.0.0', description: 'Template Version (e.g., 2.0.1')
     }
 
     environment {
@@ -26,39 +27,39 @@ pipeline {
         OPENSEARCH_ADMIN_USER = "${params.OPENSEARCH_ADMIN_USER}"
         OPENSEARCH_ADMIN_PASSWORD = "${params.OPENSEARCH_ADMIN_PASSWORD}"
         NGINX_AUTH_PASSWORD = "${params.NGINX_AUTH_PASSWORD}"
+        TEMPLATE_VERSION = "${params.TEMPLATE_VERSION}"
     }
 
     stages {
         stage('Install dependencies') {
-    steps {
-        script {
-            sh '''
-                echo "Installing AWS CLI..."
-                apt-get update
-                apt-get install -y unzip curl
-                
-                # Check if AWS CLI is already installed
-                if ! command -v aws &> /dev/null; then
-                    echo "AWS CLI not found. Installing..."
-                    curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-                    # Force overwrite during unzip
-                    unzip -o -q awscliv2.zip
-                    ./aws/install --update
-                else
-                    echo "AWS CLI is already installed"
-                    aws --version
-                fi
-                
-                # Verify AWS CLI installation
-                aws --version || {
-                    echo "AWS CLI installation failed"
-                    exit 1
+            steps {
+                script {
+                    sh '''
+                        echo "Installing AWS CLI..."
+                        apt-get update
+                        apt-get install -y unzip curl
+
+                        # Check if AWS CLI is already installed
+                        if ! command -v aws &> /dev/null; then
+                            echo "AWS CLI not found. Installing..."
+                            curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+                            unzip -o -q awscliv2.zip
+                            ./aws/install --update
+                        else
+                            echo "AWS CLI is already installed"
+                            aws --version
+                        fi
+
+                        # Verify AWS CLI installation
+                        aws --version || {
+                            echo "AWS CLI installation failed"
+                            exit 1
+                        }
+                        echo "AWS CLI installation successful"
+                    '''
                 }
-                echo "AWS CLI installation successful"
-            '''
+            }
         }
-    }
-}
 
         stage('Checkout Repository') {
             steps {
@@ -73,16 +74,18 @@ pipeline {
                 withAWS(credentials: 'aws-creds', region: env.AWS_REGION) {
                     sh '''
                         echo "Starting FloTorch Stack Deployment..."
+
                         aws cloudformation create-stack \
                             --region ${AWS_REGION} \
                             --stack-name flotorch-stack \
-                            --template-url https://flotorch-public.s3.amazonaws.com/templates/master-template.yaml \
+                            --template-url https://flotorch-public.s3.amazonaws.com/${TEMPLATE_VERSION}/templates/master-template.yaml \
                             --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
                             --parameters \
                                 ParameterKey=ProjectName,ParameterValue=${PROJECT_NAME} \
                                 ParameterKey=TableSuffix,ParameterValue=${TABLE_SUFFIX} \
                                 ParameterKey=ClientName,ParameterValue=${CLIENT_NAME} \
                                 ParameterKey=CreatedBy,ParameterValue=${CREATED_BY} \
+								ParameterKey=TemplateVersion,ParameterValue=${TEMPLATE_VERSION} \
                                 ParameterKey=OpenSearchAdminUser,ParameterValue=${OPENSEARCH_ADMIN_USER} \
                                 ParameterKey=OpenSearchAdminPassword,ParameterValue=${OPENSEARCH_ADMIN_PASSWORD} \
                                 ParameterKey=NginxAuthPassword,ParameterValue=${NGINX_AUTH_PASSWORD} \
