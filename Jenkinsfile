@@ -12,7 +12,7 @@ pipeline {
         string(name: 'TABLE_SUFFIX', defaultValue: '', description: 'Unique Table Suffix (6 lowercase letters)')
         string(name: 'CLIENT_NAME', defaultValue: 'flotorch', description: 'Client Name (e.g., flotorch)')
         string(name: 'CREATED_BY', defaultValue: 'DevOpsTeam', description: 'Created by (e.g., DevOpsTeam)')
-	string(name: 'TEMPLATE_VERSION', defaultValue: 'v1.0.0', description: 'Template Version (e.g., 2.0.1')
+	string(name: 'TEMPLATE_VERSION', defaultValue: 'v1.0.0', description: 'Template Version (e.g., 2.0.1)')
         string(name: 'OPENSEARCH_ADMIN_USER', defaultValue: 'admin', description: 'OpenSearch Admin Username')
         password(name: 'OPENSEARCH_ADMIN_PASSWORD', description: 'OpenSearch Admin Password')
         password(name: 'NGINX_AUTH_PASSWORD', description: 'Nginx Auth Password')
