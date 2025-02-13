@@ -12,10 +12,10 @@ pipeline {
         string(name: 'TABLE_SUFFIX', defaultValue: '', description: 'Unique Table Suffix (6 lowercase letters)')
         string(name: 'CLIENT_NAME', defaultValue: 'flotorch', description: 'Client Name (e.g., flotorch)')
         string(name: 'CREATED_BY', defaultValue: 'DevOpsTeam', description: 'Created by (e.g., DevOpsTeam)')
+	string(name: 'TEMPLATE_VERSION', defaultValue: 'v1.0.0', description: 'Template Version (e.g., 2.0.1')
         string(name: 'OPENSEARCH_ADMIN_USER', defaultValue: 'admin', description: 'OpenSearch Admin Username')
         password(name: 'OPENSEARCH_ADMIN_PASSWORD', description: 'OpenSearch Admin Password')
         password(name: 'NGINX_AUTH_PASSWORD', description: 'Nginx Auth Password')
-        string(name: 'TEMPLATE_VERSION', defaultValue: 'v1.0.0', description: 'Template Version (e.g., 2.0.1')
     }
 
     environment {
@@ -24,10 +24,10 @@ pipeline {
         TABLE_SUFFIX = "${params.TABLE_SUFFIX}"
         CLIENT_NAME = "${params.CLIENT_NAME}"
         CREATED_BY = "${params.CREATED_BY}"
+	TEMPLATE_VERSION = "${params.TEMPLATE_VERSION}"
         OPENSEARCH_ADMIN_USER = "${params.OPENSEARCH_ADMIN_USER}"
         OPENSEARCH_ADMIN_PASSWORD = "${params.OPENSEARCH_ADMIN_PASSWORD}"
         NGINX_AUTH_PASSWORD = "${params.NGINX_AUTH_PASSWORD}"
-        TEMPLATE_VERSION = "${params.TEMPLATE_VERSION}"
     }
 
     stages {
@@ -85,7 +85,7 @@ pipeline {
                                 ParameterKey=TableSuffix,ParameterValue=${TABLE_SUFFIX} \
                                 ParameterKey=ClientName,ParameterValue=${CLIENT_NAME} \
                                 ParameterKey=CreatedBy,ParameterValue=${CREATED_BY} \
-								ParameterKey=TemplateVersion,ParameterValue=${TEMPLATE_VERSION} \
+				ParameterKey=TemplateVersion,ParameterValue=${TEMPLATE_VERSION} \
                                 ParameterKey=OpenSearchAdminUser,ParameterValue=${OPENSEARCH_ADMIN_USER} \
                                 ParameterKey=OpenSearchAdminPassword,ParameterValue=${OPENSEARCH_ADMIN_PASSWORD} \
                                 ParameterKey=NginxAuthPassword,ParameterValue=${NGINX_AUTH_PASSWORD} \
