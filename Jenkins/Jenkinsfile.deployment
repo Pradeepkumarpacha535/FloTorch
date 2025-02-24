@@ -1,3 +1,4 @@
+
 pipeline {
     agent {
         docker {
@@ -59,21 +60,9 @@ pipeline {
                                 echo "Building and pushing ${service} image..."
                                
                                 // Get the correct Dockerfile path and verify it exists
-                                def dockerfilePath
-                                if (service == 'indexing') {
-                                    // Check for fargate_indexing.Dockerfile first
-                                    if (fileExists("${service}/fargate_indexing.Dockerfile")) {
-                                        dockerfilePath = "${service}/fargate_indexing.Dockerfile"
-                                    } else if (fileExists("${service}/Dockerfile")) {
-                                        dockerfilePath = "${service}/Dockerfile"
-                                    } else {
-                                        error "No Dockerfile found for ${service}"
-                                    }
-                                } else {
-                                    dockerfilePath = "${service}/Dockerfile"
-                                    if (!fileExists(dockerfilePath)) {
-                                        error "Dockerfile not found at ${dockerfilePath}"
-                                    }
+                                def dockerfilePath = "${service}/Dockerfile"
+                                if (!fileExists(dockerfilePath)) {
+                                    error "Dockerfile not found at ${dockerfilePath}"
                                 }
                                
                                 echo "Using Dockerfile at: ${dockerfilePath}"
@@ -87,12 +76,11 @@ pipeline {
                                     fi
                                 """
                                
-                                // Build and push with full error handling
+                                // Build and push
                                 try {
                                     sh """
                                         # Build image
-                                        DOCKER_BUILDKIT=1 docker build -t ${imageTag} \
-                                            -f ${dockerfilePath} . || exit 1
+                                        docker build -t ${imageTag} -f ${dockerfilePath} . || exit 1
                                        
                                         # Push image
                                         docker push ${imageTag} || exit 1
@@ -125,4 +113,3 @@ pipeline {
         }
     }
 }
-
