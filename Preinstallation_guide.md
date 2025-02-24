@@ -20,7 +20,7 @@ sudo apt-get install -y python3 python3-pip
 ```
 
 ### Easy Installation:
-If the above commands are not run then execute [Script.md](./Script.md)
+If the above commands are not run then execute [Script.sh](./Script.sh)
 
 ---
 
