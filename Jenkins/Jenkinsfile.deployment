@@ -75,52 +75,56 @@ pipeline {
                 }
             }
         }
+    stage('Deploy to Environment') {
+    steps {
+        script {
+            def envName = params.ENVIRONMENT == 'dev' ? params.DEV_ENV : 
+                         params.ENVIRONMENT == 'qa' ? params.QA_ENV : 'prod'
+            
+            echo "Deploying to ${params.ENVIRONMENT} environment: ${envName}"
+            echo "Using build version: ${params.BUILD_VERSION}"
+            
+            // AWS ECR Login
+            withAWS(credentials: 'aws-creds', region: env.AWS_REGION) {
+                sh """
+                    aws ecr get-login-password --region ${AWS_REGION} | \
+                    docker login --username AWS --password-stdin ${ECR_REGISTRY}
+                """
 
+                // Build and push Docker images
+                def services = [
+                    [name: 'app', dockerfile: 'app/Dockerfile'],
+                    [name: 'indexing', dockerfile: 'indexing/fargate_indexing.Dockerfile'],
+                    [name: 'retriever', dockerfile: 'retriever/fargate_retriever.Dockerfile'],
+                    [name: 'evaluation', dockerfile: 'evaluation/fargate_evaluation.Dockerfile'],
+                    [name: 'runtime', dockerfile: 'opensearch/opensearch.Dockerfile']
+                ]
 
-        stage('Deploy to Environment') {
-            steps {
-                script {
-                    def envName = params.ENVIRONMENT == 'dev' ? params.DEV_ENV :
-                                 params.ENVIRONMENT == 'qa' ? params.QA_ENV : 'prod'
-                   
-                    echo "Deploying to ${params.ENVIRONMENT} environment: ${envName}"
-                    echo "Using build version: ${params.BUILD_VERSION}"
-                   
-                    // AWS ECR Login
-                    withAWS(credentials: 'aws-creds', region: env.AWS_REGION) {
-                        sh """
-                            aws ecr get-login-password --region ${AWS_REGION} | \
-                            docker login --username AWS --password-stdin ${ECR_REGISTRY}
-                        """
+                services.each { service ->
+                    def imageTag = "${ECR_REGISTRY}/flotorch-${service.name}-${envName}:${params.BUILD_VERSION}"
+                    sh """
+                        # Build image
+                        docker build -t ${imageTag} -f ${service.dockerfile} .
+                        # Push image
+                        docker push ${imageTag}
+                    """
+                }
 
-                        // Build and push Docker images
-                        def services = [
-                            [name: 'app', dockerfile: 'app/Dockerfile'],
-                            [name: 'indexing', dockerfile: 'indexing/fargate_indexing.Dockerfile'],
-                            [name: 'retriever', dockerfile: 'retriever/fargate_retriever.Dockerfile'],
-                            [name: 'evaluation', dockerfile: 'evaluation/fargate_evaluation.Dockerfile'],
-                            [name: 'runtime', dockerfile: 'opensearch/opensearch.Dockerfile']
-                        ]
-
-                        services.each { service ->
-                            sh """
-                                docker build -t ${ECR_REGISTRY}/flotorch-${service.name}-${envName}:${params.BUILD_VERSION} \
-                                -f ${service.dockerfile} --push .
-                            """
-                        }
-
-                        dir('lambda_handlers') {
-                            sh """
-                                docker build -t ${ECR_REGISTRY}/flotorch-costcompute-${envName}:${params.BUILD_VERSION} \
-                                -f cost_handler/Dockerfile --push .
-                            """
-                        }
-                    }
+                dir('lambda_handlers') {
+                    def costComputeTag = "${ECR_REGISTRY}/flotorch-costcompute-${envName}:${params.BUILD_VERSION}"
+                    sh """
+                        # Build cost compute handler
+                        docker build -t ${costComputeTag} -f cost_handler/Dockerfile .
+                        # Push image
+                        docker push ${costComputeTag}
+                    """
                 }
             }
         }
     }
+}
 
+        
     post {
         success {
             echo "Deployment successful to ${params.ENVIRONMENT} with version ${params.BUILD_VERSION}"
