@@ -44,7 +44,7 @@ pipeline {
                         'retriever',
                         'evaluation'
                     ]
-                    
+                   
                     withAWS(credentials: 'aws-creds', region: env.AWS_REGION) {
                         try {
                             // ECR Login
@@ -52,25 +52,56 @@ pipeline {
                                 aws ecr get-login-password --region ${AWS_REGION} | \
                                 docker login --username AWS --password-stdin ${ECR_REGISTRY}
                             """
-                            
+                           
                             // Build and push each service
                             services.each { service ->
                                 def imageTag = "${ECR_REGISTRY}/flotorch-${service}-${ENV_NAME}:${params.BUILD_VERSION}"
                                 echo "Building and pushing ${service} image..."
-                                
-                                // Determine which Dockerfile to use
-                                def dockerfilePath = service == 'app' ? 'app/Dockerfile' : 'Dockerfile'
-                                
+                               
+                                // Get the correct Dockerfile path and verify it exists
+                                def dockerfilePath
+                                if (service == 'indexing') {
+                                    // Check for fargate_indexing.Dockerfile first
+                                    if (fileExists("${service}/fargate_indexing.Dockerfile")) {
+                                        dockerfilePath = "${service}/fargate_indexing.Dockerfile"
+                                    } else if (fileExists("${service}/Dockerfile")) {
+                                        dockerfilePath = "${service}/Dockerfile"
+                                    } else {
+                                        error "No Dockerfile found for ${service}"
+                                    }
+                                } else {
+                                    dockerfilePath = "${service}/Dockerfile"
+                                    if (!fileExists(dockerfilePath)) {
+                                        error "Dockerfile not found at ${dockerfilePath}"
+                                    }
+                                }
+                               
+                                echo "Using Dockerfile at: ${dockerfilePath}"
+                               
+                                // Create ECR repository if it doesn't exist
+                                def repoName = "flotorch-${service}-${ENV_NAME}"
                                 sh """
-                                    # Build image
-                                    docker build -t ${imageTag} \
-                                        --build-arg SERVICE=${service} \
-                                        -f ${dockerfilePath} . || exit 1
-                                    # Push image
-                                    docker push ${imageTag} || exit 1
+                                    if ! aws ecr describe-repositories --repository-names ${repoName} --region ${AWS_REGION} 2>/dev/null; then
+                                        echo "Creating ECR repository: ${repoName}"
+                                        aws ecr create-repository --repository-name ${repoName} --region ${AWS_REGION}
+                                    fi
                                 """
-                                
-                                echo "${service} image built and pushed successfully"
+                               
+                                // Build and push with full error handling
+                                try {
+                                    sh """
+                                        # Build image
+                                        DOCKER_BUILDKIT=1 docker build -t ${imageTag} \
+                                            -f ${dockerfilePath} . || exit 1
+                                       
+                                        # Push image
+                                        docker push ${imageTag} || exit 1
+                                    """
+                                    echo "${service} image built and pushed successfully"
+                                } catch (Exception e) {
+                                    echo "Failed to build/push ${service} image: ${e.getMessage()}"
+                                    throw e
+                                }
                             }
                         } catch (Exception e) {
                             echo "Error during build/push: ${e.getMessage()}"
@@ -94,3 +125,4 @@ pipeline {
         }
     }
 }
+
