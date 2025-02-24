@@ -7,31 +7,14 @@ pipeline {
     }
 
     parameters {
-        // Interactive Parameters
         choice(name: 'ENVIRONMENT', choices: ['dev', 'qa', 'prod'], description: 'Select deployment environment (dev/qa/prod)')
         string(name: 'BUILD_VERSION', defaultValue: 'latest', description: 'Specify build version')
-
-        // Pre-configured Environment Values (non-interactive)
-        // Dev Environment (fixed values)
-        string(name: 'DEV_ENV', defaultValue: 'dampen')
-        string(name: 'DEV_URL', defaultValue: 'https://radd4urst2.us-east-1.awsapprunner.com')
-        string(name: 'DEV_USERNAME', defaultValue: 'admin')
-        password(name: 'DEV_PASSWORD', defaultValue: 'jkhg78BKUYBKGUY7*nhiH')
-
-        // QA Environment (fixed values)
-        string(name: 'QA_ENV', defaultValue: 'iamdqa')
-        string(name: 'QA_URL', defaultValue: 'https://tmmqcidccg.us-east-1.awsapprunner.com')
-        string(name: 'QA_USERNAME', defaultValue: 'admin')
-        password(name: 'QA_PASSWORD', defaultValue: 'jkhrg&*ObliubUH*(8')
-
-        // Prod Environment (fixed values)
-        string(name: 'PROD_USERNAME', defaultValue: 'admin')
-        password(name: 'PROD_PASSWORD', defaultValue: '')
     }
 
     environment {
         ECR_REGISTRY = '677276078734.dkr.ecr.us-east-1.amazonaws.com'
         AWS_REGION = 'us-east-1'
+        ENV_NAME = "${params.ENVIRONMENT == 'dev' ? 'dampen' : params.ENVIRONMENT == 'qa' ? 'iamdqa' : 'prod'}"
     }
 
     stages {
@@ -57,66 +40,9 @@ pipeline {
             }
         }
 
-        stage('Parameter Validation') {
+        stage('Build and Push Images') {
             steps {
                 script {
-                    echo "Selected Environment: ${params.ENVIRONMENT}"
-                    echo "Build Version: ${params.BUILD_VERSION}"
-                   
-                    if (params.ENVIRONMENT == 'prod') {
-                        input message: 'Confirm Production Deployment', ok: 'Proceed'
-                    }
-                }
-            }
-        }
-
-        stage('Create Deployment Files') {
-            steps {
-                script {
-                    // Create entrypoint.sh
-                    writeFile file: 'entrypoint.sh', text: '''#!/bin/bash
-                    htpasswd -bc /etc/nginx/.htpasswd admin ${NGINX_AUTH_PASSWORD}
-                    supervisord -n -c /etc/supervisor/supervisord.conf
-                    '''
-                   
-                    sh 'chmod +x entrypoint.sh'
-
-                    // Create supervisor.conf
-                    writeFile file: 'supervisor.conf', text: '''[supervisord]
-                    nodaemon=true
-
-                    [program:nginx]
-                    command=/usr/sbin/nginx -g "daemon off;"
-                    autostart=true
-                    autorestart=true
-                    stdout_logfile=/dev/stdout
-                    stdout_logfile_maxbytes=0
-                    stderr_logfile=/dev/stderr
-                    stderr_logfile_maxbytes=0
-
-                    [program:app]
-                    command=python main.py
-                    directory=/app
-                    autostart=true
-                    autorestart=true
-                    stdout_logfile=/dev/stdout
-                    stdout_logfile_maxbytes=0
-                    stderr_logfile=/dev/stderr
-                    stderr_logfile_maxbytes=0
-                    '''
-                }
-            }
-        }
-
-        stage('Deploy to Environment') {
-            steps {
-                script {
-                    def envName = params.ENVIRONMENT == 'dev' ? params.DEV_ENV :
-                                 params.ENVIRONMENT == 'qa' ? params.QA_ENV : 'prod'
-                   
-                    echo "Deploying to ${params.ENVIRONMENT} environment: ${envName}"
-                    echo "Using build version: ${params.BUILD_VERSION}"
-                   
                     withAWS(credentials: 'aws-creds', region: env.AWS_REGION) {
                         // ECR Login
                         sh """
@@ -124,76 +50,13 @@ pipeline {
                             docker login --username AWS --password-stdin ${ECR_REGISTRY}
                         """
 
-                        // Build and push Docker images
-                        def services = [
-                            [name: 'app', dockerfile: 'app/Dockerfile'],
-                            [name: 'indexing', dockerfile: 'indexing/fargate_indexing.Dockerfile'],
-                            [name: 'retriever', dockerfile: 'retriever/fargate_retriever.Dockerfile'],
-                            [name: 'evaluation', dockerfile: 'evaluation/fargate_evaluation.Dockerfile'],
-                            [name: 'runtime', dockerfile: 'opensearch/opensearch.Dockerfile']
-                        ]
-
-                        services.each { service ->
-                            sh """
-                                # Build image
-                                docker build -t ${ECR_REGISTRY}/flotorch-${service.name}-${envName}:${params.BUILD_VERSION} \
-                                -f ${service.dockerfile} .
-                                # Push image
-                                docker push ${ECR_REGISTRY}/flotorch-${service.name}-${envName}:${params.BUILD_VERSION}
-                            """
-                        }
-
-                        dir('lambda_handlers') {
-                            def costComputeTag = "${ECR_REGISTRY}/flotorch-costcompute-${envName}:${params.BUILD_VERSION}"
-                            sh """
-                                # Build cost compute handler
-                                docker build -t ${costComputeTag} -f cost_handler/Dockerfile .
-                                # Push image
-                                docker push ${costComputeTag}
-                            """
-                        }
-                    }
-                }
-            }
-        }
-
-        stage('Update Services') {
-            steps {
-                script {
-                    def envName = params.ENVIRONMENT == 'dev' ? params.DEV_ENV :
-                                 params.ENVIRONMENT == 'qa' ? params.QA_ENV : 'prod'
-                   
-                    withAWS(credentials: 'aws-creds', region: env.AWS_REGION) {
-                        // Update App Runner Service
+                        // Build and push app service
+                        def appImageTag = "${ECR_REGISTRY}/flotorch-app-${ENV_NAME}:${params.BUILD_VERSION}"
                         sh """
-                            aws apprunner update-service \
-                                --service-name flotorch-app-${envName} \
-                                --source-configuration imageRepository={imageIdentifier=${ECR_REGISTRY}/flotorch-app-${envName}:${params.BUILD_VERSION}}
-                        """
-
-                        // Update ECS Services
-                        sh """
-                            aws ecs update-service \
-                                --cluster flotorch-${envName} \
-                                --service flotorch-indexing-${envName} \
-                                --force-new-deployment
-
-                            aws ecs update-service \
-                                --cluster flotorch-${envName} \
-                                --service flotorch-retriever-${envName} \
-                                --force-new-deployment
-
-                            aws ecs update-service \
-                                --cluster flotorch-${envName} \
-                                --service flotorch-evaluation-${envName} \
-                                --force-new-deployment
-                        """
-
-                        // Update Lambda Function
-                        sh """
-                            aws lambda update-function-code \
-                                --function-name flotorch-costcompute-${envName} \
-                                --image-uri ${ECR_REGISTRY}/flotorch-costcompute-${envName}:${params.BUILD_VERSION}
+                            # Build image
+                            docker build -t ${appImageTag} -f app/Dockerfile .
+                            # Push image
+                            docker push ${appImageTag}
                         """
                     }
                 }
@@ -203,10 +66,10 @@ pipeline {
 
     post {
         success {
-            echo "Deployment successful to ${params.ENVIRONMENT} with version ${params.BUILD_VERSION}"
+            echo "Successfully built and pushed images for ${params.ENVIRONMENT} with version ${params.BUILD_VERSION}"
         }
         failure {
-            echo "Deployment failed for ${params.ENVIRONMENT}"
+            echo "Failed to build/push images for ${params.ENVIRONMENT}"
         }
         always {
             cleanWs()
@@ -214,4 +77,3 @@ pipeline {
         }
     }
 }
-
