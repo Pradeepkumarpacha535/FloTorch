@@ -67,6 +67,7 @@ stage('Build and Push Images') {
         }
     }
 }
+}
 
     post {
         success {
