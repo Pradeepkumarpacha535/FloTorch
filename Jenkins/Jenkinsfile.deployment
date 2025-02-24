@@ -5,18 +5,15 @@ pipeline {
             args '-u root'
         }
     }
-
     parameters {
         choice(name: 'ENVIRONMENT', choices: ['dev', 'qa', 'prod'], description: 'Select deployment environment (dev/qa/prod)')
         string(name: 'BUILD_VERSION', defaultValue: 'latest', description: 'Specify build version')
     }
-
     environment {
         ECR_REGISTRY = '677276078734.dkr.ecr.us-east-1.amazonaws.com'
         AWS_REGION = 'us-east-1'
         ENV_NAME = "${params.ENVIRONMENT == 'dev' ? 'dampen' : params.ENVIRONMENT == 'qa' ? 'iamdqa' : 'prod'}"
     }
-
     stages {
         stage('Install Dependencies') {
             steps {
@@ -31,7 +28,6 @@ pipeline {
                 }
             }
         }
-
         stage('Checkout') {
             steps {
                 cleanWs()
@@ -39,10 +35,16 @@ pipeline {
                     url: 'https://github.com/shivani-fission/FloTorch.git'
             }
         }
-
         stage('Build and Push Images') {
             steps {
                 script {
+                    def services = [
+                        'app',
+                        'indexing',
+                        'retriever',
+                        'evaluation'
+                    ]
+                    
                     withAWS(credentials: 'aws-creds', region: env.AWS_REGION) {
                         try {
                             // ECR Login
@@ -51,14 +53,25 @@ pipeline {
                                 docker login --username AWS --password-stdin ${ECR_REGISTRY}
                             """
                             
-                            // Build and push app service
-                            def appImageTag = "${ECR_REGISTRY}/flotorch-app-${ENV_NAME}:${params.BUILD_VERSION}"
-                            sh """
-                                # Build image
-                                docker build -t ${appImageTag} -f app/Dockerfile . || exit 1
-                                # Push image
-                                docker push ${appImageTag} || exit 1
-                            """
+                            // Build and push each service
+                            services.each { service ->
+                                def imageTag = "${ECR_REGISTRY}/flotorch-${service}-${ENV_NAME}:${params.BUILD_VERSION}"
+                                echo "Building and pushing ${service} image..."
+                                
+                                // Determine which Dockerfile to use
+                                def dockerfilePath = service == 'app' ? 'app/Dockerfile' : 'Dockerfile'
+                                
+                                sh """
+                                    # Build image
+                                    docker build -t ${imageTag} \
+                                        --build-arg SERVICE=${service} \
+                                        -f ${dockerfilePath} . || exit 1
+                                    # Push image
+                                    docker push ${imageTag} || exit 1
+                                """
+                                
+                                echo "${service} image built and pushed successfully"
+                            }
                         } catch (Exception e) {
                             echo "Error during build/push: ${e.getMessage()}"
                             throw e
@@ -67,11 +80,10 @@ pipeline {
                 }
             }
         }
-    }  // Closing brace for 'stages' block
-
+    }
     post {
         success {
-            echo "Successfully built and pushed images for ${params.ENVIRONMENT} with version ${params.BUILD_VERSION}"
+            echo "Successfully built and pushed all images for ${params.ENVIRONMENT} with version ${params.BUILD_VERSION}"
         }
         failure {
             echo "Failed to build/push images for ${params.ENVIRONMENT}"
