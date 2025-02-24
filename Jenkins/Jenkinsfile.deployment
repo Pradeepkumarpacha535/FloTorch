@@ -53,9 +53,7 @@ pipeline {
 
         stage('Checkout') {
             steps {
-                // Clean workspace before checkout
                 cleanWs()
-                // Checkout source code
                 git branch: 'main',
                     url: 'https://github.com/FissionAI/FloTorch.git'
             }
@@ -66,65 +64,60 @@ pipeline {
                 script {
                     echo "Selected Environment: ${params.ENVIRONMENT}"
                     echo "Build Version: ${params.BUILD_VERSION}"
-                    echo "Skip Tests: ${params.SKIP_TESTS}"
-                   
-                    // Additional validation for Production
+
                     if (params.ENVIRONMENT == 'prod') {
                         input message: 'Confirm Production Deployment', ok: 'Proceed'
                     }
                 }
             }
         }
-    stage('Deploy to Environment') {
-    steps {
-        script {
-            def envName = params.ENVIRONMENT == 'dev' ? params.DEV_ENV : 
-                         params.ENVIRONMENT == 'qa' ? params.QA_ENV : 'prod'
-            
-            echo "Deploying to ${params.ENVIRONMENT} environment: ${envName}"
-            echo "Using build version: ${params.BUILD_VERSION}"
-            
-            // AWS ECR Login
-            withAWS(credentials: 'aws-creds', region: env.AWS_REGION) {
-                sh """
-                    aws ecr get-login-password --region ${AWS_REGION} | \
-                    docker login --username AWS --password-stdin ${ECR_REGISTRY}
-                """
 
-                // Build and push Docker images
-                def services = [
-                    [name: 'app', dockerfile: 'app/Dockerfile'],
-                    [name: 'indexing', dockerfile: 'indexing/fargate_indexing.Dockerfile'],
-                    [name: 'retriever', dockerfile: 'retriever/fargate_retriever.Dockerfile'],
-                    [name: 'evaluation', dockerfile: 'evaluation/fargate_evaluation.Dockerfile'],
-                    [name: 'runtime', dockerfile: 'opensearch/opensearch.Dockerfile']
-                ]
+        stage('Deploy to Environment') {
+            steps {
+                script {
+                    def envName = params.ENVIRONMENT == 'dev' ? params.DEV_ENV : 
+                                 params.ENVIRONMENT == 'qa' ? params.QA_ENV : 'prod'
+                    
+                    echo "Deploying to ${params.ENVIRONMENT} environment: ${envName}"
+                    echo "Using build version: ${params.BUILD_VERSION}"
+                    
+                    // AWS ECR Login
+                    withAWS(credentials: 'aws-creds', region: env.AWS_REGION) {
+                        sh """
+                            aws ecr get-login-password --region ${AWS_REGION} | \
+                            docker login --username AWS --password-stdin ${ECR_REGISTRY}
+                        """
 
-                services.each { service ->
-                    def imageTag = "${ECR_REGISTRY}/flotorch-${service.name}-${envName}:${params.BUILD_VERSION}"
-                    sh """
-                        # Build image
-                        docker build -t ${imageTag} -f ${service.dockerfile} .
-                        # Push image
-                        docker push ${imageTag}
-                    """
-                }
+                        // Build and push Docker images
+                        def services = [
+                            [name: 'app', dockerfile: 'app/Dockerfile'],
+                            [name: 'indexing', dockerfile: 'indexing/fargate_indexing.Dockerfile'],
+                            [name: 'retriever', dockerfile: 'retriever/fargate_retriever.Dockerfile'],
+                            [name: 'evaluation', dockerfile: 'evaluation/fargate_evaluation.Dockerfile'],
+                            [name: 'runtime', dockerfile: 'opensearch/opensearch.Dockerfile']
+                        ]
 
-                dir('lambda_handlers') {
-                    def costComputeTag = "${ECR_REGISTRY}/flotorch-costcompute-${envName}:${params.BUILD_VERSION}"
-                    sh """
-                        # Build cost compute handler
-                        docker build -t ${costComputeTag} -f cost_handler/Dockerfile .
-                        # Push image
-                        docker push ${costComputeTag}
-                    """
+                        services.each { service ->
+                            def imageTag = "${ECR_REGISTRY}/flotorch-${service.name}-${envName}:${params.BUILD_VERSION}"
+                            sh """
+                                docker build -t ${imageTag} -f ${service.dockerfile} .
+                                docker push ${imageTag}
+                            """
+                        }
+
+                        dir('lambda_handlers') {
+                            def costComputeTag = "${ECR_REGISTRY}/flotorch-costcompute-${envName}:${params.BUILD_VERSION}"
+                            sh """
+                                docker build -t ${costComputeTag} -f cost_handler/Dockerfile .
+                                docker push ${costComputeTag}
+                            """
+                        }
+                    }
                 }
             }
         }
-    }
-}
+    } 
 
-        
     post {
         success {
             echo "Deployment successful to ${params.ENVIRONMENT} with version ${params.BUILD_VERSION}"
@@ -137,4 +130,4 @@ pipeline {
             sh 'docker system prune -f'
         }
     }
-}
+} 
