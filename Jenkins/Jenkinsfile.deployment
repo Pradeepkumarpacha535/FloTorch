@@ -1,0 +1,136 @@
+pipeline {
+    agent {
+        docker {
+            image 'ubuntu:latest'
+            args '-u root'
+        }
+    }
+
+    parameters {
+        // Interactive Parameters
+        choice(name: 'ENVIRONMENT', choices: ['dev', 'qa', 'prod'], description: 'Select deployment environment (dev/qa/prod)')
+        string(name: 'BUILD_VERSION', defaultValue: 'latest', description: 'Specify build version')
+
+        // Pre-configured Environment Values (non-interactive)
+        // Dev Environment (fixed values)
+        string(name: 'DEV_ENV', defaultValue: 'dampen')
+        string(name: 'DEV_URL', defaultValue: 'https://radd4urst2.us-east-1.awsapprunner.com')
+        string(name: 'DEV_USERNAME', defaultValue: 'admin')
+        password(name: 'DEV_PASSWORD', defaultValue: 'jkhg78BKUYBKGUY7*nhiH')
+
+        // QA Environment (fixed values)
+        string(name: 'QA_ENV', defaultValue: 'iamdqa')
+        string(name: 'QA_URL', defaultValue: 'https://tmmqcidccg.us-east-1.awsapprunner.com')
+        string(name: 'QA_USERNAME', defaultValue: 'admin')
+        password(name: 'QA_PASSWORD', defaultValue: 'jkhrg&*ObliubUH*(8')
+
+        // Prod Environment (fixed values)
+        string(name: 'PROD_USERNAME', defaultValue: 'admin')
+        password(name: 'PROD_PASSWORD', defaultValue: '')
+    }
+
+    environment {
+        ECR_REGISTRY = '677276078734.dkr.ecr.us-east-1.amazonaws.com'
+        AWS_REGION = 'us-east-1'
+    }
+
+    stages {
+        stage('Install Dependencies') {
+            steps {
+                script {
+                    sh '''
+                        apt-get update
+                        apt-get install -y docker.io curl unzip git
+                       
+                        # Install AWS CLI
+                        curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+                        unzip -o -q awscliv2.zip
+                        ./aws/install --update
+                    '''
+                }
+            }
+        }
+
+        stage('Checkout') {
+            steps {
+                // Clean workspace before checkout
+                cleanWs()
+                // Checkout source code
+                git branch: 'main',
+                    url: 'https://github.com/FissionAI/FloTorch.git'
+            }
+        }
+
+        stage('Parameter Validation') {
+            steps {
+                script {
+                    echo "Selected Environment: ${params.ENVIRONMENT}"
+                    echo "Build Version: ${params.BUILD_VERSION}"
+                    echo "Skip Tests: ${params.SKIP_TESTS}"
+                   
+                    // Additional validation for Production
+                    if (params.ENVIRONMENT == 'prod') {
+                        input message: 'Confirm Production Deployment', ok: 'Proceed'
+                    }
+                }
+            }
+        }
+
+
+        stage('Deploy to Environment') {
+            steps {
+                script {
+                    def envName = params.ENVIRONMENT == 'dev' ? params.DEV_ENV :
+                                 params.ENVIRONMENT == 'qa' ? params.QA_ENV : 'prod'
+                   
+                    echo "Deploying to ${params.ENVIRONMENT} environment: ${envName}"
+                    echo "Using build version: ${params.BUILD_VERSION}"
+                   
+                    // AWS ECR Login
+                    withAWS(credentials: 'aws-creds', region: env.AWS_REGION) {
+                        sh """
+                            aws ecr get-login-password --region ${AWS_REGION} | \
+                            docker login --username AWS --password-stdin ${ECR_REGISTRY}
+                        """
+
+                        // Build and push Docker images
+                        def services = [
+                            [name: 'app', dockerfile: 'app/Dockerfile'],
+                            [name: 'indexing', dockerfile: 'indexing/fargate_indexing.Dockerfile'],
+                            [name: 'retriever', dockerfile: 'retriever/fargate_retriever.Dockerfile'],
+                            [name: 'evaluation', dockerfile: 'evaluation/fargate_evaluation.Dockerfile'],
+                            [name: 'runtime', dockerfile: 'opensearch/opensearch.Dockerfile']
+                        ]
+
+                        services.each { service ->
+                            sh """
+                                docker build -t ${ECR_REGISTRY}/flotorch-${service.name}-${envName}:${params.BUILD_VERSION} \
+                                -f ${service.dockerfile} --push .
+                            """
+                        }
+
+                        dir('lambda_handlers') {
+                            sh """
+                                docker build -t ${ECR_REGISTRY}/flotorch-costcompute-${envName}:${params.BUILD_VERSION} \
+                                -f cost_handler/Dockerfile --push .
+                            """
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "Deployment successful to ${params.ENVIRONMENT} with version ${params.BUILD_VERSION}"
+        }
+        failure {
+            echo "Deployment failed for ${params.ENVIRONMENT}"
+        }
+        always {
+            cleanWs()
+            sh 'docker system prune -f'
+        }
+    }
+}
