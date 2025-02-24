@@ -36,33 +36,37 @@ pipeline {
             steps {
                 cleanWs()
                 git branch: 'main',
-                    url: 'https://github.com/FissionAI/FloTorch.git'
+                    url: 'https://github.com/shivani-fission/FloTorch.git'
             }
         }
 
-        stage('Build and Push Images') {
-            steps {
-                script {
-                    withAWS(credentials: 'aws-creds', region: env.AWS_REGION) {
-                        // ECR Login
-                        sh """
-                            aws ecr get-login-password --region ${AWS_REGION} | \
-                            docker login --username AWS --password-stdin ${ECR_REGISTRY}
-                        """
-
-                        // Build and push app service
-                        def appImageTag = "${ECR_REGISTRY}/flotorch-app-${ENV_NAME}:${params.BUILD_VERSION}"
-                        sh """
-                            # Build image
-                            docker build -t ${appImageTag} -f app/Dockerfile .
-                            # Push image
-                            docker push ${appImageTag}
-                        """
-                    }
+stage('Build and Push Images') {
+    steps {
+        script {
+            withAWS(credentials: 'aws-creds', region: env.AWS_REGION) {
+                try {
+                    // ECR Login
+                    sh """
+                        aws ecr get-login-password --region ${AWS_REGION} | \
+                        docker login --username AWS --password-stdin ${ECR_REGISTRY}
+                    """
+                    
+                    // Build and push app service
+                    def appImageTag = "${ECR_REGISTRY}/flotorch-app-${ENV_NAME}:${params.BUILD_VERSION}"
+                    sh """
+                        # Build image
+                        docker build -t ${appImageTag} -f app/Dockerfile . || exit 1
+                        # Push image
+                        docker push ${appImageTag} || exit 1
+                    """
+                } catch (Exception e) {
+                    echo "Error during build/push: ${e.getMessage()}"
+                    throw e
                 }
             }
         }
     }
+}
 
     post {
         success {
