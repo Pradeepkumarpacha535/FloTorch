@@ -1,0 +1,153 @@
+pipeline {
+    agent {
+        docker {
+            image 'ubuntu:latest'
+            args '-u root'
+        }
+    }
+    parameters {
+        choice(name: 'ENVIRONMENT', choices: ['dev', 'qa', 'prod'], description: 'Select deployment environment (dev/qa/prod)')
+        string(name: 'BUILD_VERSION', defaultValue: 'latest', description: 'Specify build version')
+    }
+    environment {
+        ECR_REGISTRY = '677276078734.dkr.ecr.us-east-1.amazonaws.com'
+        AWS_REGION = 'us-east-1'
+        ENV_NAME = "${params.ENVIRONMENT == 'dev' ? 'dampen' : params.ENVIRONMENT == 'qa' ? 'iamdqa' : 'prod'}"
+    }
+    stages {
+        stage('Install Dependencies') {
+            steps {
+                script {
+                    sh '''
+                        apt-get update
+                        apt-get install -y docker.io curl unzip git
+                        curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+                        unzip -o -q awscliv2.zip
+                        ./aws/install --update
+                    '''
+                }
+            }
+        }
+        stage('Checkout') {
+            steps {
+                cleanWs()
+                git branch: 'main',
+                    url: 'https://github.com/shivani-fission/FloTorch.git'
+            }
+        }
+        stage("Build and Push Images - ${params.ENVIRONMENT.toUpperCase()}") {
+            steps {
+                script {
+                    def services = [
+                        'app',
+                        'indexing',
+                        'retriever',
+                        'evaluation'
+                    ]
+                   
+                    def builtImages = []
+                   
+                    withAWS(credentials: 'aws-creds', region: env.AWS_REGION) {
+                        try {
+                            // ECR Login
+                            sh """
+                                aws ecr get-login-password --region ${AWS_REGION} | \
+                                docker login --username AWS --password-stdin ${ECR_REGISTRY}
+                            """
+                           
+                            // Build and push each service
+                            services.each { service ->
+                                def repoName = "flotorch-${service}-${ENV_NAME}"
+                                def imageTag = "${ECR_REGISTRY}/${repoName}:${params.BUILD_VERSION}"
+                                echo "Building and pushing ${service} image for ${params.ENVIRONMENT}..."
+                               
+                                // Get the correct Dockerfile path and verify it exists
+                                def dockerfilePath = "${service}/Dockerfile"
+                                if (!fileExists(dockerfilePath)) {
+                                    error "Dockerfile not found at ${dockerfilePath}"
+                                }
+                               
+                                echo "Using Dockerfile at: ${dockerfilePath}"
+                               
+                                // Create ECR repository if it doesn't exist
+                                sh """
+                                    if ! aws ecr describe-repositories --repository-names ${repoName} --region ${AWS_REGION} 2>/dev/null; then
+                                        echo "Creating ECR repository: ${repoName}"
+                                        aws ecr create-repository --repository-name ${repoName} --region ${AWS_REGION}
+                                    fi
+                                """
+                               
+                                // Build and push
+                                try {
+                                    sh """
+                                        # Build image
+                                        docker build -t ${imageTag} -f ${dockerfilePath} . || exit 1
+                                       
+                                        # Push image
+                                        docker push ${imageTag} || exit 1
+                                    """
+                                    builtImages.add([
+                                        service: service,
+                                        repo: repoName,
+                                        image: imageTag,
+                                        environment: params.ENVIRONMENT
+                                    ])
+                                    echo "${service} image built and pushed to ${params.ENVIRONMENT} successfully"
+                                } catch (Exception e) {
+                                    echo "Failed to build/push ${service} image for ${params.ENVIRONMENT}: ${e.getMessage()}"
+                                    throw e
+                                }
+                            }
+                           
+                            // Create dashboard summary
+                            def summary = "Images pushed to ${params.ENVIRONMENT.toUpperCase()} repositories:\n"
+                            builtImages.each { img ->
+                                summary += "- ${img.service}: ${img.image}\n"
+                            }
+                           
+                            // Display dashboard summary
+                            echo summary
+                           
+                            // Create a build artifact with the summary
+                            writeFile file: "${params.ENVIRONMENT}-images.txt", text: summary
+                            archiveArtifacts artifacts: "${params.ENVIRONMENT}-images.txt", allowEmptyArchive: true
+                           
+                        } catch (Exception e) {
+                            echo "Error during build/push for ${params.ENVIRONMENT}: ${e.getMessage()}"
+                            throw e
+                        }
+                    }
+                }
+            }
+        }
+        stage('Deployment Summary') {
+            steps {
+                script {
+                    echo """
+                    =================================================
+                    DEPLOYMENT SUMMARY FOR ${params.ENVIRONMENT.toUpperCase()}
+                    =================================================
+                    Environment: ${params.ENVIRONMENT}
+                    Env Name: ${ENV_NAME}
+                    Build Version: ${params.BUILD_VERSION}
+                    Registry: ${ECR_REGISTRY}
+                    Services Deployed: app, indexing, retriever, evaluation
+                    =================================================
+                    """
+                }
+            }
+        }
+    }
+    post {
+        success {
+            echo "Successfully built and pushed all images for ${params.ENVIRONMENT} with version ${params.BUILD_VERSION}"
+        }
+        failure {
+            echo "Failed to build/push images for ${params.ENVIRONMENT}"
+        }
+        always {
+            cleanWs()
+            sh 'docker system prune -f'
+        }
+    }
+}
