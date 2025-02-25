@@ -129,7 +129,7 @@ pipeline {
                                     sh """
                                     cat > ${dockerfilePath} << 'EOL'
 FROM ubuntu:latest
-RUN echo "This is a test image for ${service} - built on $(date)"
+RUN echo "This is a test image for ${service} - built on \$(date)"
 CMD ["echo", "Hello from ${service}"]
 EOL
                                     """
@@ -152,7 +152,7 @@ EOL
                                    
                                     sh """
                                         # Build image with build date label to ensure uniqueness
-                                        docker build --build-arg BUILD_DATE=${timestamp} -t ${imageTagWithVersion} -f ${dockerfilePath} . || exit 1
+                                        docker build --build-arg BUILD_DATE="${timestamp}" -t ${imageTagWithVersion} -f ${dockerfilePath} . || exit 1
                                        
                                         # Push with version number
                                         docker push ${imageTagWithVersion} || exit 1
