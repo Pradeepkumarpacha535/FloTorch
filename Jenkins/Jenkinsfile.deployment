@@ -8,6 +8,7 @@ pipeline {
     parameters {
         choice(name: 'ENVIRONMENT', choices: ['dev', 'qa', 'prod'], description: 'Select deployment environment (dev/qa/prod)')
         string(name: 'BUILD_VERSION', defaultValue: 'latest', description: 'Specify build version')
+        booleanParam(name: 'FORCE_REBUILD', defaultValue: true, description: 'Force rebuild even if image exists')
     }
     environment {
         ECR_REGISTRY = '677276078734.dkr.ecr.us-east-1.amazonaws.com'
@@ -20,7 +21,7 @@ pipeline {
                 script {
                     sh '''
                         apt-get update
-                        apt-get install -y docker.io curl unzip git
+                        apt-get install -y docker.io curl unzip git jq
                         curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
                         unzip -o -q awscliv2.zip
                         ./aws/install --update
@@ -33,6 +34,54 @@ pipeline {
                 cleanWs()
                 git branch: 'main',
                     url: 'https://github.com/shivani-fission/FloTorch.git'
+            }
+        }
+        stage('Clean Up Old Tags') {
+            steps {
+                script {
+                    // Define services
+                    def services = ['app', 'indexing', 'retriever', 'evaluation']
+                   
+                    withAWS(credentials: 'aws-creds', region: env.AWS_REGION) {
+                        services.each { service ->
+                            def repoName = "flotorch-${service}-${ENV_NAME}"
+                           
+                            echo "Cleaning up repository: ${repoName}"
+                           
+                            try {
+                                // Check if repository exists
+                                sh """
+                                    if aws ecr describe-repositories --repository-names ${repoName} --region ${AWS_REGION} 2>/dev/null; then
+                                        echo "Repository exists: ${repoName}"
+                                       
+                                        # First, remove any comma-separated multi-tagged images
+                                        MULTI_TAGS=\$(aws ecr list-images --repository-name ${repoName} --query "imageIds[?contains(imageTag, ',')].imageTag" --output json)
+                                        if [ "\$(echo \$MULTI_TAGS | jq 'length')" -gt "0" ]; then
+                                            echo "Found multi-tagged images, removing them..."
+                                            echo \$MULTI_TAGS | jq -r '.[]' | while read -r tag; do
+                                                aws ecr batch-delete-image --repository-name ${repoName} --image-ids imageTag="\$tag" || true
+                                            done
+                                        fi
+                                       
+                                        # If FORCE_REBUILD is true, remove the specific version tag if it exists
+                                        if [ "${params.FORCE_REBUILD}" = "true" ]; then
+                                            echo "Checking if version ${params.BUILD_VERSION} exists..."
+                                            if aws ecr describe-images --repository-name ${repoName} --image-ids imageTag=${params.BUILD_VERSION} 2>/dev/null; then
+                                                echo "Removing existing image with tag ${params.BUILD_VERSION}"
+                                                aws ecr batch-delete-image --repository-name ${repoName} --image-ids imageTag=${params.BUILD_VERSION} || true
+                                            fi
+                                        fi
+                                    else
+                                        echo "Repository does not exist: ${repoName}"
+                                    fi
+                                """
+                            } catch (Exception e) {
+                                echo "Warning: Error during cleanup for ${repoName}: ${e.getMessage()}"
+                                // Continue with next repository
+                            }
+                        }
+                    }
+                }
             }
         }
         stage('Build and Push Images') {
@@ -80,7 +129,7 @@ pipeline {
                                     sh """
                                     cat > ${dockerfilePath} << 'EOL'
 FROM ubuntu:latest
-RUN echo "This is a test image for ${service}"
+RUN echo "This is a test image for ${service} - built on $(date)"
 CMD ["echo", "Hello from ${service}"]
 EOL
                                     """
@@ -98,26 +147,23 @@ EOL
                                
                                 // Build and push
                                 try {
+                                    // Add a timestamp to the image to ensure it's unique
+                                    def timestamp = new Date().format("yyyyMMdd-HHmmss")
+                                   
                                     sh """
-                                        # Build image
-                                        docker build -t ${imageTagWithVersion} -f ${dockerfilePath} . || exit 1
+                                        # Build image with build date label to ensure uniqueness
+                                        docker build --build-arg BUILD_DATE=${timestamp} -t ${imageTagWithVersion} -f ${dockerfilePath} . || exit 1
                                        
-                                        # Tag with version number only (no additional tags)
+                                        # Push with version number
                                         docker push ${imageTagWithVersion} || exit 1
                                        
-                                        # Only tag as 'latest' if specifically requested
+                                        # Tag as latest if requested
                                         if [ "${params.BUILD_VERSION}" != "latest" ]; then
                                             docker tag ${imageTagWithVersion} ${imageTagLatest}
                                             docker push ${imageTagLatest} || exit 1
                                             echo "Tagged and pushed as both ${params.BUILD_VERSION} and latest"
                                         else
                                             echo "Tagged and pushed as latest only"
-                                        fi
-                                       
-                                        # Remove any old multi-tag references
-                                        if aws ecr list-images --repository-name ${repoName} --query "imageIds[?contains(imageTag, ',')].imageTag" --output text | grep -q '.'; then
-                                            echo "Found multi-tagged images, removing them..."
-                                            aws ecr list-images --repository-name ${repoName} --query "imageIds[?contains(imageTag, ',')].imageTag" --output text | xargs -I {} aws ecr batch-delete-image --repository-name ${repoName} --image-ids imageTag={}
                                         fi
                                     """
                                    
