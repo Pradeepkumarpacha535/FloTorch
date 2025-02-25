@@ -35,16 +35,10 @@ pipeline {
                     url: 'https://github.com/shivani-fission/FloTorch.git'
             }
         }
-        stage("Build and Push Images - ${params.ENVIRONMENT.toUpperCase()}") {
+        stage('Build and Push Images') {  
             steps {
                 script {
-                    def services = [
-                        'app',
-                        'indexing',
-                        'retriever',
-                        'evaluation'
-                    ]
-                   
+                    def services = ['app', 'indexing', 'retriever', 'evaluation']
                     def builtImages = []
                    
                     withAWS(credentials: 'aws-creds', region: env.AWS_REGION) {
@@ -81,10 +75,9 @@ pipeline {
                                 try {
                                     sh """
                                         # Build image
-                                        docker build -t ${imageTag} -f ${dockerfilePath} . || exit 1
-                                       
+                                        docker build -t ${imageTag} -f ${dockerfilePath} .
                                         # Push image
-                                        docker push ${imageTag} || exit 1
+                                        docker push ${imageTag}
                                     """
                                     builtImages.add([
                                         service: service,
