@@ -149,12 +149,17 @@ EOL
                                 try {
                                     // Add a timestamp to the image to ensure it's unique
                                     def timestamp = new Date().format("yyyyMMdd-HHmmss")
+                                    def uniqueImageTag = "${ECR_REGISTRY}/${repoName}:build-${timestamp}"
                                    
                                     sh """
-                                        # Build image with build date label to ensure uniqueness
-                                        docker build --build-arg BUILD_DATE="${timestamp}" -t ${imageTagWithVersion} -f ${dockerfilePath} . || exit 1
+                                        # Build image with a unique temporary tag first to avoid reusing existing images
+                                        echo "Building fresh image with timestamp ${timestamp}"
+                                        docker build --no-cache --build-arg BUILD_DATE="${timestamp}" -t ${uniqueImageTag} -f ${dockerfilePath} . || exit 1
                                        
-                                        # Push with version number only - no latest tag
+                                        # Tag with the requested version
+                                        docker tag ${uniqueImageTag} ${imageTagWithVersion}
+                                       
+                                        # Push the version-tagged image
                                         docker push ${imageTagWithVersion} || exit 1
                                        
                                         echo "Tagged and pushed as ${params.BUILD_VERSION} only"
