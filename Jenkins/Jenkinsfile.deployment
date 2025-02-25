@@ -48,6 +48,7 @@ pipeline {
                     echo """
                     ===================================================
                     BUILDING IMAGES FOR: ${params.ENVIRONMENT.toUpperCase()}
+                    BUILD VERSION: ${params.BUILD_VERSION}
                     ALL SERVICES: ${services.join(', ')}
                     ===================================================
                     """
@@ -63,7 +64,9 @@ pipeline {
                             // Build and push each service
                             services.each { service ->
                                 def repoName = "flotorch-${service}-${ENV_NAME}"
-                                def imageTag = "${ECR_REGISTRY}/${repoName}:${params.BUILD_VERSION}"
+                                def imageTagWithVersion = "${ECR_REGISTRY}/${repoName}:${params.BUILD_VERSION}"
+                                def imageTagLatest = "${ECR_REGISTRY}/${repoName}:latest"
+                               
                                 echo "Building and pushing ${service} image for ${params.ENVIRONMENT}..."
                                
                                 // Get the correct Dockerfile path and verify it exists
@@ -97,15 +100,31 @@ EOL
                                 try {
                                     sh """
                                         # Build image
-                                        docker build -t ${imageTag} -f ${dockerfilePath} . || exit 1
+                                        docker build -t ${imageTagWithVersion} -f ${dockerfilePath} . || exit 1
                                        
-                                        # Push image
-                                        docker push ${imageTag} || exit 1
+                                        # Tag with version number only (no additional tags)
+                                        docker push ${imageTagWithVersion} || exit 1
+                                       
+                                        # Only tag as 'latest' if specifically requested
+                                        if [ "${params.BUILD_VERSION}" != "latest" ]; then
+                                            docker tag ${imageTagWithVersion} ${imageTagLatest}
+                                            docker push ${imageTagLatest} || exit 1
+                                            echo "Tagged and pushed as both ${params.BUILD_VERSION} and latest"
+                                        else
+                                            echo "Tagged and pushed as latest only"
+                                        fi
+                                       
+                                        # Remove any old multi-tag references
+                                        if aws ecr list-images --repository-name ${repoName} --query "imageIds[?contains(imageTag, ',')].imageTag" --output text | grep -q '.'; then
+                                            echo "Found multi-tagged images, removing them..."
+                                            aws ecr list-images --repository-name ${repoName} --query "imageIds[?contains(imageTag, ',')].imageTag" --output text | xargs -I {} aws ecr batch-delete-image --repository-name ${repoName} --image-ids imageTag={}
+                                        fi
                                     """
+                                   
                                     builtImages.add([
                                         service: service,
                                         repo: repoName,
-                                        image: imageTag,
+                                        image: imageTagWithVersion,
                                         environment: params.ENVIRONMENT
                                     ])
                                     echo "${service} image built and pushed to ${params.ENVIRONMENT} successfully"
@@ -157,10 +176,10 @@ EOL
                     Registry: ${ECR_REGISTRY}
                    
                     Services Deployed:
-                    - app: flotorch-app-${ENV_NAME}
-                    - indexing: flotorch-indexing-${ENV_NAME}
-                    - retriever: flotorch-retriever-${ENV_NAME}
-                    - evaluation: flotorch-evaluation-${ENV_NAME}
+                    - app: ${ECR_REGISTRY}/flotorch-app-${ENV_NAME}:${params.BUILD_VERSION}
+                    - indexing: ${ECR_REGISTRY}/flotorch-indexing-${ENV_NAME}:${params.BUILD_VERSION}
+                    - retriever: ${ECR_REGISTRY}/flotorch-retriever-${ENV_NAME}:${params.BUILD_VERSION}
+                    - evaluation: ${ECR_REGISTRY}/flotorch-evaluation-${ENV_NAME}:${params.BUILD_VERSION}
                    
                     Repository Pattern: flotorch-{service}-${ENV_NAME}
                     =================================================
