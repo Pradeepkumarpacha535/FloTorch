@@ -8,7 +8,7 @@ pipeline {
     parameters {
         choice(name: 'ENVIRONMENT', choices: ['dev', 'qa', 'prod'], description: 'Select deployment environment (dev/qa/prod)')
         string(name: 'BUILD_VERSION', defaultValue: 'latest', description: 'Specify build version')
-        booleanParam(name: 'FORCE_REBUILD', defaultValue: true, description: 'Force rebuild even if image exists')
+        booleanParam(name: 'FORCE_REBUILD', defaultValue: true, description: 'Force rebuild even if image with the same tag exists')
     }
     environment {
         ECR_REGISTRY = '677276078734.dkr.ecr.us-east-1.amazonaws.com'
@@ -54,7 +54,7 @@ pipeline {
                                     if aws ecr describe-repositories --repository-names ${repoName} --region ${AWS_REGION} 2>/dev/null; then
                                         echo "Repository exists: ${repoName}"
                                        
-                                        # First, remove any comma-separated multi-tagged images
+                                        # Only remove comma-separated multi-tagged images
                                         MULTI_TAGS=\$(aws ecr list-images --repository-name ${repoName} --query "imageIds[?contains(imageTag, ',')].imageTag" --output json)
                                         if [ "\$(echo \$MULTI_TAGS | jq 'length')" -gt "0" ]; then
                                             echo "Found multi-tagged images, removing them..."
@@ -63,7 +63,7 @@ pipeline {
                                             done
                                         fi
                                        
-                                        # If FORCE_REBUILD is true, remove the specific version tag if it exists
+                                        # Only if FORCE_REBUILD is true, remove the specific version tag if it exists
                                         if [ "${params.FORCE_REBUILD}" = "true" ]; then
                                             echo "Checking if version ${params.BUILD_VERSION} exists..."
                                             if aws ecr describe-images --repository-name ${repoName} --image-ids imageTag=${params.BUILD_VERSION} 2>/dev/null; then
@@ -154,17 +154,10 @@ EOL
                                         # Build image with build date label to ensure uniqueness
                                         docker build --build-arg BUILD_DATE="${timestamp}" -t ${imageTagWithVersion} -f ${dockerfilePath} . || exit 1
                                        
-                                        # Push with version number
+                                        # Push with version number only - no latest tag
                                         docker push ${imageTagWithVersion} || exit 1
                                        
-                                        # Tag as latest if requested
-                                        if [ "${params.BUILD_VERSION}" != "latest" ]; then
-                                            docker tag ${imageTagWithVersion} ${imageTagLatest}
-                                            docker push ${imageTagLatest} || exit 1
-                                            echo "Tagged and pushed as both ${params.BUILD_VERSION} and latest"
-                                        else
-                                            echo "Tagged and pushed as latest only"
-                                        fi
+                                        echo "Tagged and pushed as ${params.BUILD_VERSION} only"
                                     """
                                    
                                     builtImages.add([
