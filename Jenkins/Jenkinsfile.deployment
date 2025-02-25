@@ -1,4 +1,3 @@
-
 pipeline {
     agent {
         docker {
@@ -36,7 +35,7 @@ pipeline {
                     url: 'https://github.com/shivani-fission/FloTorch.git'
             }
         }
-        stage('Build and Push Images') {
+        stage("Build and Push Images - ${params.ENVIRONMENT.toUpperCase()}") {
             steps {
                 script {
                     def services = [
@@ -45,6 +44,8 @@ pipeline {
                         'retriever',
                         'evaluation'
                     ]
+                   
+                    def builtImages = []
                    
                     withAWS(credentials: 'aws-creds', region: env.AWS_REGION) {
                         try {
@@ -56,8 +57,9 @@ pipeline {
                            
                             // Build and push each service
                             services.each { service ->
-                                def imageTag = "${ECR_REGISTRY}/flotorch-${service}-${ENV_NAME}:${params.BUILD_VERSION}"
-                                echo "Building and pushing ${service} image..."
+                                def repoName = "flotorch-${service}-${ENV_NAME}"
+                                def imageTag = "${ECR_REGISTRY}/${repoName}:${params.BUILD_VERSION}"
+                                echo "Building and pushing ${service} image for ${params.ENVIRONMENT}..."
                                
                                 // Get the correct Dockerfile path and verify it exists
                                 def dockerfilePath = "${service}/Dockerfile"
@@ -68,7 +70,6 @@ pipeline {
                                 echo "Using Dockerfile at: ${dockerfilePath}"
                                
                                 // Create ECR repository if it doesn't exist
-                                def repoName = "flotorch-${service}-${ENV_NAME}"
                                 sh """
                                     if ! aws ecr describe-repositories --repository-names ${repoName} --region ${AWS_REGION} 2>/dev/null; then
                                         echo "Creating ECR repository: ${repoName}"
@@ -85,17 +86,54 @@ pipeline {
                                         # Push image
                                         docker push ${imageTag} || exit 1
                                     """
-                                    echo "${service} image built and pushed successfully"
+                                    builtImages.add([
+                                        service: service,
+                                        repo: repoName,
+                                        image: imageTag,
+                                        environment: params.ENVIRONMENT
+                                    ])
+                                    echo "${service} image built and pushed to ${params.ENVIRONMENT} successfully"
                                 } catch (Exception e) {
-                                    echo "Failed to build/push ${service} image: ${e.getMessage()}"
+                                    echo "Failed to build/push ${service} image for ${params.ENVIRONMENT}: ${e.getMessage()}"
                                     throw e
                                 }
                             }
+                           
+                            // Create dashboard summary
+                            def summary = "Images pushed to ${params.ENVIRONMENT.toUpperCase()} repositories:\n"
+                            builtImages.each { img ->
+                                summary += "- ${img.service}: ${img.image}\n"
+                            }
+                           
+                            // Display dashboard summary
+                            echo summary
+                           
+                            // Create a build artifact with the summary
+                            writeFile file: "${params.ENVIRONMENT}-images.txt", text: summary
+                            archiveArtifacts artifacts: "${params.ENVIRONMENT}-images.txt", allowEmptyArchive: true
+                           
                         } catch (Exception e) {
-                            echo "Error during build/push: ${e.getMessage()}"
+                            echo "Error during build/push for ${params.ENVIRONMENT}: ${e.getMessage()}"
                             throw e
                         }
                     }
+                }
+            }
+        }
+        stage('Deployment Summary') {
+            steps {
+                script {
+                    echo """
+                    =================================================
+                    DEPLOYMENT SUMMARY FOR ${params.ENVIRONMENT.toUpperCase()}
+                    =================================================
+                    Environment: ${params.ENVIRONMENT}
+                    Env Name: ${ENV_NAME}
+                    Build Version: ${params.BUILD_VERSION}
+                    Registry: ${ECR_REGISTRY}
+                    Services Deployed: app, indexing, retriever, evaluation
+                    =================================================
+                    """
                 }
             }
         }
