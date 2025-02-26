@@ -1,1 +1,160 @@
-
+pipeline {
+    agent {
+        docker {
+            image 'public.ecr.aws/amazonlinux/amazonlinux:2'
+            args '-u root'
+        }
+    }
+   
+    parameters {
+        string(name: 'ENVIRONMENT_SUFFIX', defaultValue: '', description: 'Enter the environment suffix for ECR repositories (e.g., jasper)')
+    }
+   
+    environment {
+        ECR_ACCOUNT_ID = '677276078734'
+        AWS_REGION = 'us-east-1'
+        ENV_SUFFIX = "${params.ENVIRONMENT_SUFFIX}"
+    }
+   
+    stages {
+        stage('Validate Parameters') {
+            steps {
+                script {
+                    if (params.ENVIRONMENT_SUFFIX.trim() == '') {
+                        error "ENVIRONMENT_SUFFIX parameter is required. Please provide a valid value."
+                    }
+                    echo "Building and pushing images with suffix: ${ENV_SUFFIX}"
+                }
+            }
+        }
+       
+        stage('Install Dependencies') {
+            steps {
+                sh '''
+                    yum update -y
+                    yum install -y docker git curl unzip
+                    amazon-linux-extras install docker -y
+                    service docker start
+                    curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+                    unzip -o -q awscliv2.zip
+                    ./aws/install --update
+                '''
+            }
+        }
+       
+        stage('ECR Login') {
+            steps {
+                withAWS(credentials: 'aws-creds', region: env.AWS_REGION) {
+                    sh '''
+                        # Get AWS account ID
+                        account_id=$(aws sts get-caller-identity --query Account --output text)
+                       
+                        # Login to ECR
+                        aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${account_id}.dkr.ecr.${AWS_REGION}.amazonaws.com
+                    '''
+                }
+            }
+        }
+       
+        stage('Build and Push Images') {
+            steps {
+                withAWS(credentials: 'aws-creds', region: env.AWS_REGION) {
+                    sh '''
+                        # Get AWS account ID
+                        account_id=$(aws sts get-caller-identity --query Account --output text)
+                       
+                        # Verify and/or create ECR repositories
+                        repos=("flotorch-app" "flotorch-indexing" "flotorch-retriever" "flotorch-evaluation" "flotorch-runtime" "flotorch-costcompute")
+                       
+                        for repo in "${repos[@]}"; do
+                            repo_name="${repo}-${ENV_SUFFIX}"
+                            if ! aws ecr describe-repositories --repository-names "$repo_name" --region ${AWS_REGION} >/dev/null 2>&1; then
+                                echo "Creating repository: $repo_name"
+                                aws ecr create-repository --repository-name "$repo_name" --region ${AWS_REGION} --image-scanning-configuration scanOnPush=true
+                            else
+                                echo "Repository $repo_name already exists"
+                            fi
+                        done
+                       
+                        # Build and push Docker images
+                        echo "Building and pushing Docker images with suffix: ${ENV_SUFFIX}"
+                       
+                        # Build app image
+                        echo "Building app image..."
+                        docker build --platform linux/amd64 -t ${account_id}.dkr.ecr.${AWS_REGION}.amazonaws.com/flotorch-app-${ENV_SUFFIX}:latest -f app/Dockerfile .
+                        docker push ${account_id}.dkr.ecr.${AWS_REGION}.amazonaws.com/flotorch-app-${ENV_SUFFIX}:latest
+                       
+                        # Build indexing image
+                        echo "Building indexing image..."
+                        docker build --platform linux/amd64 -t ${account_id}.dkr.ecr.${AWS_REGION}.amazonaws.com/flotorch-indexing-${ENV_SUFFIX}:latest -f indexing/fargate_indexing.Dockerfile .
+                        docker push ${account_id}.dkr.ecr.${AWS_REGION}.amazonaws.com/flotorch-indexing-${ENV_SUFFIX}:latest
+                       
+                        # Build retriever image
+                        echo "Building retriever image..."
+                        docker build --platform linux/amd64 -t ${account_id}.dkr.ecr.${AWS_REGION}.amazonaws.com/flotorch-retriever-${ENV_SUFFIX}:latest -f retriever/fargate_retriever.Dockerfile .
+                        docker push ${account_id}.dkr.ecr.${AWS_REGION}.amazonaws.com/flotorch-retriever-${ENV_SUFFIX}:latest
+                       
+                        # Build evaluation image
+                        echo "Building evaluation image..."
+                        docker build --platform linux/amd64 -t ${account_id}.dkr.ecr.${AWS_REGION}.amazonaws.com/flotorch-evaluation-${ENV_SUFFIX}:latest -f evaluation/fargate_evaluation.Dockerfile .
+                        docker push ${account_id}.dkr.ecr.${AWS_REGION}.amazonaws.com/flotorch-evaluation-${ENV_SUFFIX}:latest
+                       
+                        # Build runtime image
+                        echo "Building runtime image..."
+                        docker build --platform linux/amd64 -t ${account_id}.dkr.ecr.${AWS_REGION}.amazonaws.com/flotorch-runtime-${ENV_SUFFIX}:latest -f opensearch/opensearch.Dockerfile .
+                        docker push ${account_id}.dkr.ecr.${AWS_REGION}.amazonaws.com/flotorch-runtime-${ENV_SUFFIX}:latest
+                       
+                        # Build cost compute image
+                        echo "Building cost compute image..."
+                        cd lambda_handlers
+                        docker build --platform linux/amd64 -t ${account_id}.dkr.ecr.${AWS_REGION}.amazonaws.com/flotorch-costcompute-${ENV_SUFFIX}:latest -f cost_handler/Dockerfile .
+                        docker push ${account_id}.dkr.ecr.${AWS_REGION}.amazonaws.com/flotorch-costcompute-${ENV_SUFFIX}:latest
+                        cd ..
+                    '''
+                }
+            }
+        }
+       
+        stage('Display Build Summary') {
+            steps {
+                withAWS(credentials: 'aws-creds', region: env.AWS_REGION) {
+                    sh '''
+                        # Get AWS account ID
+                        account_id=$(aws sts get-caller-identity --query Account --output text)
+                       
+                        echo "==================================================="
+                        echo "BUILD AND PUSH SUMMARY FOR ${ENV_SUFFIX}"
+                        echo "==================================================="
+                        echo "Environment Suffix: ${ENV_SUFFIX}"
+                        echo "AWS Region: ${AWS_REGION}"
+                        echo "ECR Account ID: ${account_id}"
+                        echo ""
+                        echo "Images Pushed:"
+                        echo "- flotorch-app-${ENV_SUFFIX}:latest"
+                        echo "- flotorch-indexing-${ENV_SUFFIX}:latest"
+                        echo "- flotorch-retriever-${ENV_SUFFIX}:latest"
+                        echo "- flotorch-evaluation-${ENV_SUFFIX}:latest"
+                        echo "- flotorch-runtime-${ENV_SUFFIX}:latest"
+                        echo "- flotorch-costcompute-${ENV_SUFFIX}:latest"
+                        echo ""
+                        echo "Repository Pattern: flotorch-{service}-${ENV_SUFFIX}"
+                        echo "==================================================="
+                    '''
+                }
+            }
+        }
+    }
+   
+    post {
+        success {
+            echo "All images successfully built and pushed to ECR repositories with suffix: ${ENV_SUFFIX}"
+        }
+        failure {
+            echo "Failed to build and push images to ECR repositories"
+        }
+        always {
+            cleanWs()
+            sh 'docker system prune -f'
+        }
+    }
+}
