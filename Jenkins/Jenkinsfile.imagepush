@@ -12,7 +12,6 @@ pipeline {
         ECR_REGISTRY = '677276078734.dkr.ecr.us-east-1.amazonaws.com'
         AWS_REGION = 'us-east-1'
         ENV_SUFFIX = "${params.ENVIRONMENT_SUFFIX}"
-        BUILD_TIMESTAMP = "${new Date().format('yyyyMMdd-HHmmss')}"
     }
     stages {
         stage('Validate Parameters') {
@@ -72,11 +71,9 @@ pipeline {
                             // Build and push each service
                             services.each { service ->
                                 def repoName = "flotorch-${service.name}-${ENV_SUFFIX}"
-                                def uniqueTag = "${BUILD_TIMESTAMP}"
-                                def imageTag = "${ECR_REGISTRY}/${repoName}:${uniqueTag}"
-                                def latestTag = "${ECR_REGISTRY}/${repoName}:latest"
+                                def imageTag = "${ECR_REGISTRY}/${repoName}:latest"
                                 
-                                echo "Building and pushing ${service.name} image with tag ${uniqueTag}..."
+                                echo "Building and pushing ${service.name} image with tag latest..."
                                
                                 // Check if Dockerfile exists
                                 if (!fileExists(service.dockerfile)) {
@@ -109,39 +106,32 @@ pipeline {
                                     error "Failed to build image: ${imageTag}"
                                 }
                                 
-                                // Tag with latest as well
-                                sh "docker tag ${imageTag} ${latestTag}"
-                                
-                                // Push both tags
+                                // Push the image
                                 def pushStatus = sh(script: """
-                                    # Push image with unique tag
-                                    docker push ${imageTag} && \
                                     # Push image with latest tag
-                                    docker push ${latestTag}
+                                    docker push ${imageTag}
                                 """, returnStatus: true)
                                 
                                 if (pushStatus != 0) {
-                                    error "Failed to push image: ${imageTag} or ${latestTag}"
+                                    error "Failed to push image: ${imageTag}"
                                 }
                                 
                                 // Verify the push was successful
                                 def verifyStatus = sh(script: """
                                     # Verify the image exists in ECR
-                                    aws ecr describe-images --repository-name ${repoName} --image-ids imageTag=${uniqueTag} --region ${AWS_REGION}
+                                    aws ecr describe-images --repository-name ${repoName} --image-ids imageTag=latest --region ${AWS_REGION}
                                 """, returnStatus: true)
                                 
                                 if (verifyStatus != 0) {
-                                    error "Failed to verify image in ECR: ${repoName}:${uniqueTag}"
+                                    error "Failed to verify image in ECR: ${repoName}:latest"
                                 }
                                 
-                                echo "${service.name} image built and pushed successfully with tags: ${uniqueTag} and latest"
+                                echo "${service.name} image built and pushed successfully with tag: latest"
                             }
                            
                             // Build and push cost compute image separately
                             def costComputeRepo = "flotorch-costcompute-${ENV_SUFFIX}"
-                            def costUniqueTag = "${BUILD_TIMESTAMP}"
-                            def costImageTag = "${ECR_REGISTRY}/${costComputeRepo}:${costUniqueTag}"
-                            def costLatestTag = "${ECR_REGISTRY}/${costComputeRepo}:latest"
+                            def costImageTag = "${ECR_REGISTRY}/${costComputeRepo}:latest"
                            
                             def costRepoStatus = sh(script: """
                                 if ! aws ecr describe-repositories --repository-names ${costComputeRepo} --region ${AWS_REGION} 2>/dev/null; then
@@ -166,32 +156,27 @@ pipeline {
                                 error "Failed to build cost compute image: ${costImageTag}"
                             }
                             
-                            // Tag with latest
-                            sh "docker tag ${costImageTag} ${costLatestTag}"
-                            
-                            // Push both tags
+                            // Push the cost compute image
                             def costPushStatus = sh(script: """
-                                # Push image with unique tag
-                                docker push ${costImageTag} && \
                                 # Push image with latest tag
-                                docker push ${costLatestTag}
+                                docker push ${costImageTag}
                             """, returnStatus: true)
                             
                             if (costPushStatus != 0) {
-                                error "Failed to push cost compute image: ${costImageTag} or ${costLatestTag}"
+                                error "Failed to push cost compute image: ${costImageTag}"
                             }
                             
                             // Verify the push was successful
                             def costVerifyStatus = sh(script: """
                                 # Verify the image exists in ECR
-                                aws ecr describe-images --repository-name ${costComputeRepo} --image-ids imageTag=${costUniqueTag} --region ${AWS_REGION}
+                                aws ecr describe-images --repository-name ${costComputeRepo} --image-ids imageTag=latest --region ${AWS_REGION}
                             """, returnStatus: true)
                             
                             if (costVerifyStatus != 0) {
-                                error "Failed to verify cost compute image in ECR: ${costComputeRepo}:${costUniqueTag}"
+                                error "Failed to verify cost compute image in ECR: ${costComputeRepo}:latest"
                             }
                             
-                            echo "Cost compute image built and pushed successfully with tags: ${costUniqueTag} and latest"
+                            echo "Cost compute image built and pushed successfully with tag: latest"
                            
                         } catch (Exception e) {
                             echo "Error during build/push: ${e.getMessage()}"
@@ -212,15 +197,14 @@ pipeline {
                     Environment Suffix: ${ENV_SUFFIX}
                     AWS Region: ${AWS_REGION}
                     ECR Registry: ${ECR_REGISTRY}
-                    Build Timestamp: ${BUILD_TIMESTAMP}
                    
                     Images Pushed:
-                    - flotorch-app-${ENV_SUFFIX}:${BUILD_TIMESTAMP} and :latest
-                    - flotorch-indexing-${ENV_SUFFIX}:${BUILD_TIMESTAMP} and :latest
-                    - flotorch-retriever-${ENV_SUFFIX}:${BUILD_TIMESTAMP} and :latest
-                    - flotorch-evaluation-${ENV_SUFFIX}:${BUILD_TIMESTAMP} and :latest
-                    - flotorch-runtime-${ENV_SUFFIX}:${BUILD_TIMESTAMP} and :latest
-                    - flotorch-costcompute-${ENV_SUFFIX}:${BUILD_TIMESTAMP} and :latest
+                    - flotorch-app-${ENV_SUFFIX}:latest
+                    - flotorch-indexing-${ENV_SUFFIX}:latest
+                    - flotorch-retriever-${ENV_SUFFIX}:latest
+                    - flotorch-evaluation-${ENV_SUFFIX}:latest
+                    - flotorch-runtime-${ENV_SUFFIX}:latest
+                    - flotorch-costcompute-${ENV_SUFFIX}:latest
                    
                     Repository Pattern: flotorch-{service}-${ENV_SUFFIX}
                     =================================================
